@@ -116,8 +116,8 @@ class QuenchStencil:
 			r_sq = r**2
 			g = np.sqrt(r_sq + self.lam**2)/r
 			storage[...] = 0
-			storage[1, 1] = 1/(g*r)
-			storage[0, 0] = -(self.lam/g)/(r_sq*g)
+#			storage[1, 1] = 1/(g*r)
+#			storage[0, 0] = -(self.lam/g)/(r_sq*g)
 			storage[0, 1] = 1#g
 			return storage
 
@@ -156,7 +156,7 @@ class QuenchStencil:
 		if axis == 0:
 			return np.array([1.0, 0.0])
 		else:
-			dir_vec = self.boundary_op(s + self.lam*alpha)[0]
+			dir_vec = np.array([0.0, 1.0])#self.boundary_op(s + self.lam*alpha)[0]
 			#dir_vec /= lin.norm(dir_vec)
 			return dir_vec
 
@@ -264,6 +264,7 @@ class QuenchStencil:
 	def adjoint_diff(self, i, v, target):
 		target[...] = self.deriv_stencils[i].dot(v)
 
+
 class QuenchSim:
 	# Class representing quenching on a coiled annulus superconductor
 	def __init__(self, r_1, r_2, twist_num, h, stencil_size, degree, **kwargs):
@@ -290,6 +291,7 @@ class QuenchSim:
 
 		self.process_keywords(kwargs)
 
+
 	def process_keywords(self, kwargs):
 
 		if 'outlet_slope' in kwargs:
@@ -311,6 +313,7 @@ class QuenchSim:
 
 		for i in range(4):
 			self.stencil.differentiate(i, self.U_val, self.U_deriv[i, self.dirichlet_num:])
+
 
 	def get_U_t(self):
 		self.get_derivs()
