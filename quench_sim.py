@@ -5,8 +5,9 @@ import scipy.sparse as spar
 from numba import jit
 from scipy.spatial import KDTree
 from scipy.optimize import root
+import matplotlib.pyplot as plt
 
-from node_finder import NodeFinder
+from node_finder import NodeFinder, NodeFinderSimple
 
 @jit
 def t_ind(a, b):
@@ -18,11 +19,13 @@ def t_ind(a, b):
 
 @jit
 def phs(u, v):
-	return lin.norm(u - v)**5
+	x_mag = lin.norm(u - v)
+	return (x_mag**4)*np.log(x_mag) if x_mag != 0.0 else 0.
 
 @jit
 def phs_d(u, v):
-	return np.array([-5*v[i]*lin.norm(u - v)**3 for i in range(2)])
+	x_mag = lin.norm(u - v)
+	return np.array([-4*v[i]*np.log(x_mag)*lin.norm(x_mag)**2 - v[i]*lin.norm(x_mag)**2 for i in range(2)])
 
 @jit
 def phs_2d(u, v):
@@ -103,6 +106,7 @@ class QuenchStencil:
 		self.boundary_num = node_out['boundary_num']
 		self.outlet_num = node_out['outlet_num']
 		self.lam = node_out['lambda']
+		self.width = node_out['width']
 		# Used to find nearest neighbors:
 		self.nodes_mod = np.array([[np.cos(u[0]), np.sin(u[0]), u[1] + self.lam*u[0]] for u in self.nodes])
 
@@ -184,7 +188,7 @@ class QuenchStencil:
 
 		deriv_mat = np.zeros((GA_coords.shape[0] + p_num, 4))
 
-		eval_mat[:GA_coords.shape[0], :GA_coords.shape[0]] = np.array([[lin.norm(u - v)**5 for u in GA_coords] for v in GA_coords])
+		eval_mat[:GA_coords.shape[0], :GA_coords.shape[0]] = np.array([[np.log(lin.norm(u - v))*lin.norm(u - v)**4 if lin.norm(u - v) != 0.0 else 0.0 for u in GA_coords] for v in GA_coords])
 		
 		if edge_list:
 			# Correct eval_mat if there are boundary nodes present.
@@ -192,11 +196,13 @@ class QuenchStencil:
 				direct = int(edge_list[j]) # cast bool as integer
 				dir_vec = self.get_direction(direct, s + GA_coords[j, 1], alpha + GA_coords[j, 0])
 
-				eval_mat[j, :GA_coords.shape[0]] = dir_vec[0]*np.array([5*(GA_coords[j, 0] - v[0])*lin.norm(GA_coords[j] - v)**3 for v in GA_coords])
-				eval_mat[j, :GA_coords.shape[0]]+= dir_vec[1]*np.array([5*(GA_coords[j, 1] - v[1])*lin.norm(GA_coords[j] - v)**3 for v in GA_coords])
+				eval_mat[j, :GA_coords.shape[0]] = dir_vec[0]*np.array([4*(GA_coords[j, 0] - v[0])*np.log(lin.norm(GA_coords[j] - v))*lin.norm(GA_coords[j] - v)**2 
+																		+ (GA_coords[j, 0] - v[0])*lin.norm(GA_coords[j] - v)**2 
+																		if lin.norm(GA_coords[j] - v) != 0. else 0. for v in GA_coords])
+				eval_mat[j, :GA_coords.shape[0]]+= dir_vec[1]*np.array([4*(GA_coords[j, 1] - v[1])*np.log(lin.norm(GA_coords[j] - v))*lin.norm(GA_coords[j] - v)**2
+																		+ (GA_coords[j, 1] - v[1])*lin.norm(GA_coords[j] - v)**2 
+																		if lin.norm(GA_coords[j] - v) != 0. else 0. for v in GA_coords])
 				eval_mat[:GA_coords.shape[0], j] = eval_mat[j, :GA_coords.shape[0]]
-
-
 
 			for i in edge_list:
 				for j in edge_list:
@@ -211,10 +217,17 @@ class QuenchStencil:
 
 					eval_mat[i, j] = 0
 					for k in range(2):
-						eval_mat[i,j] -= 15*dir_matrix[k,k]*((GA_coords[i, k] - GA_coords[j, k])**2)*lin.norm(GA_coords[j] - GA_coords[i])
-						eval_mat[i,j] -= 5*dir_matrix[k,k]*lin.norm(GA_coords[j] - GA_coords[i])**3
+						if i != j:
+							eval_mat[i,j] -= 8*dir_matrix[k,k]*((GA_coords[i, k] - GA_coords[j, k])**2)*np.log(lin.norm(GA_coords[i] - GA_coords[j]))
+							eval_mat[i,j] -= 6*dir_matrix[k,k]*((GA_coords[i, k] - GA_coords[j, k])**2)
+
+							eval_mat[i,j] -= 4*dir_matrix[k,k]*np.log(lin.norm(GA_coords[j] - GA_coords[i]))*lin.norm(GA_coords[j] - GA_coords[i])**2
+							eval_mat[i,j] -= dir_matrix[k,k]*lin.norm(GA_coords[j] - GA_coords[i])**2
+
 						m = 1 - k
-						eval_mat[i,j] -= 15*dir_matrix[k,m]*((GA_coords[i, k] - GA_coords[j, k])*(GA_coords[i, m] - GA_coords[j, m]))*lin.norm(GA_coords[j] - GA_coords[i])
+						if i != j:
+							eval_mat[i,j] -= 8*dir_matrix[k,m]*((GA_coords[i, k] - GA_coords[j, k])*(GA_coords[i, m] - GA_coords[j, m]))*np.log(lin.norm(GA_coords[i] - GA_coords[j]))
+							eval_mat[i,j] -= 6*dir_matrix[k,m]*((GA_coords[i, k] - GA_coords[j, k])*(GA_coords[i, m] - GA_coords[j, m]))
 					eval_mat[j, i] = eval_mat[i, j]
 
 		i_finder = np.zeros(2)
@@ -232,17 +245,19 @@ class QuenchStencil:
 			index = self.evaluator.terms.index(tuple(i_finder))
 			deriv_mat[GA_coords.shape[0] + index, 2 + i] = 2
 
-			deriv_mat[:GA_coords.shape[0], i] = np.array([ -5*v[i]*lin.norm(v)**3 for v in GA_coords])
-			deriv_mat[:GA_coords.shape[0], 2 + i] = np.array([ 5*lin.norm(v)**3 + 15*(v[i]**2)*lin.norm(v) for v in GA_coords])
+			deriv_mat[:GA_coords.shape[0], i] = np.array([ -4*v[i]*np.log(lin.norm(v))*lin.norm(v)**2 - v[i]*lin.norm(v)**2 if lin.norm(v) != 0. else 0. for v in GA_coords])
+			deriv_mat[:GA_coords.shape[0], 2 + i] = np.array([ 4*np.log(lin.norm(v))*lin.norm(v)**2 + lin.norm(v)**2 +
+														8*(v[i]**2)*np.log(lin.norm(v)) + 6*(v[i]**2) if lin.norm(v) != 0. else 0. for v in GA_coords])
 
 			for j in edge_list:
 				direct = int(edge_list[j])
 				dir_vec = self.get_direction(direct, s + GA_coords[j, 1], alpha + GA_coords[j, 0])
 
 				v = GA_coords[j]
-				deriv_mat[j, i] = -5*(lin.norm(v)**3)*dir_vec[i] - 15*np.dot(dir_vec, v)*v[i]*lin.norm(v)
-				deriv_mat[j, 2 + i] = 30*v[i]*dir_vec[i]*lin.norm(v) + 15*np.dot(dir_vec, v)*lin.norm(v) + 15*np.dot(dir_vec, v)*(v[i]**2)/lin.norm(v)
-
+				if lin.norm(v) != 0.0:
+					deriv_mat[j, i] = -4*(lin.norm(v)**2)*np.log(lin.norm(v))*dir_vec[i] - dir_vec[i]*lin.norm(v)**2 - 8*np.dot(dir_vec, v)*v[i]*np.log(lin.norm(v)) - 6*np.dot(dir_vec, v)*v[i]
+					deriv_mat[j, 2 + i] = 16*v[i]*dir_vec[i]*np.log(lin.norm(v)) + 8*np.dot(dir_vec, v)*np.log(lin.norm(v)) + 12*dir_vec[i]*v[i] 
+					deriv_mat[j, 2 + i]+= 8*np.dot(dir_vec, v)*(v[i]**2)/(lin.norm(v)**2) + 6*np.dot(dir_vec, v)
 		for i in range(GA_coords.shape[0]):
 			if i in edge_list:
 				direct = int(edge_list[i])
@@ -256,6 +271,7 @@ class QuenchStencil:
 		weights = lin.solve(eval_mat, deriv_mat)
 		print 'max_error: ', np.max(np.abs(np.dot(eval_mat, weights) - deriv_mat))
 		weights = weights[:GA_coords.shape[0]].T
+
 		return weights, np.dot(weights, wrap_vec)
 
 	def differentiate(self, i, v, target):
@@ -269,10 +285,20 @@ class QuenchSim:
 	# Class representing quenching on a coiled annulus superconductor
 	def __init__(self, r_1, r_2, twist_num, h, stencil_size, degree, **kwargs):
 		# initialize simulation
-		self.space = NodeFinder(r_1, r_2, twist_num, h)
+		if 'simple' in kwargs:
+			if kwargs['simple']:
+				self.space = NodeFinderSimple(r_1, r_2, h)
+				self.SIMPLE = True
+			else:
+				self.space = NodeFinder(r_1, r_2, twist_num, h)
+				self.SIMPLE = False
+		else:
+			self.space = NodeFinder(r_1, r_2, twist_num, h)
+			self.SIMPLE = False
 		self.stencil = QuenchStencil(self.space, stencil_size, degree)
 		output = self.space.get_node_info()
 		self.nodes = output['nodes']
+		self.p_num = self.nodes.shape[0]
 		self.lam = output['lambda']
 		self.r = self.nodes[:, 1] + self.nodes[:, 0]*self.lam
 		self.outlet_num = output['outlet_num']
@@ -283,7 +309,10 @@ class QuenchSim:
 		self.r_1 = r_1
 
 		self.eta = np.zeros((2, self.nodes.shape[0]))
-		self.U_val = np.zeros(self.nodes.shape[0] + 1)
+		if not self.SIMPLE:
+			self.U_val = np.zeros(self.nodes.shape[0] + 1)
+		else:
+			self.U_val = np.zeros(self.nodes.shape[0])
 		self.U_deriv = np.zeros((4, self.nodes.shape[0]))
 		self.eta_deriv = np.zeros((2, self.nodes.shape[0]))
 		self.U_t = np.zeros(self.nodes.shape[0])
@@ -324,25 +353,26 @@ class QuenchSim:
 #		self.U_t += self.eta_deriv[1]*self.U_deriv[1]
 		self.U_t += self.U_deriv[2]*self.eta[0]/self.r**2
 #		self.U_t += self.U_deriv[0]*self.eta_deriv[0]/self.r**2
-		self.U_t -= self.U_deriv[0]*self.eta[0]*self.lam/self.r**3
+		self.U_t -= 2*self.U_deriv[0]*self.eta[0]*self.lam/self.r**3
 
 
 	def set_U(self, func):
 		self.U_val[...] = 0
-		self.U_val[self.dirichlet_num:-1] = np.array([func(u) for u in self.nodes[self.dirichlet_num:]])
+		self.U_val[self.dirichlet_num:self.p_num] = np.array([func(u) for u in self.nodes[self.dirichlet_num:]])
 		self.U_val[:self.outlet_num] = self.outlet_slope
-		self.U_val[-1] = func(np.array([0.0, self.r_1 + 2*np.pi*self.lam])) - func([2*np.pi, self.r_1])
+		if not self.SIMPLE:
+			self.U_val[-1] = func(np.array([0.0, self.r_1 + 2*np.pi*self.lam])) - func([2*np.pi, self.r_1])
 
 
 	def solve_U_t(self):
 
 		def objective(U):
-			self.U_val[(self.dirichlet_num + 1):-1] = U[...]
+			self.U_val[(self.dirichlet_num + 1):self.p_num] = U[...]
 			self.U_val[self.dirichlet_num] = 0.0
 			self.get_U_t()
 			return self.U_t[(self.dirichlet_num + 1):].copy()
 
-		return root(objective, self.U_val[(self.dirichlet_num + 1):-1].copy())
+		return root(objective, self.U_val[(self.dirichlet_num + 1):self.p_num].copy())
 
 
 	def step_forward(self, t_step, step_num):
@@ -362,3 +392,8 @@ class QuenchSim:
 			self.U_val[...] = rk_storage[1] + t_step*self.U_t
 			self.get_U_t()
 			self.U_val = rk_storage[1] + t_step*(rk_storage[0]/6 + rk_storage[2]/3 + rk_storage[3]/3 + self.U_t/6)
+
+	def plot_current(self):
+		# plotting routine for the current, transformed according to the new coordinates.
+		pass
+

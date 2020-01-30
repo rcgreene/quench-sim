@@ -27,36 +27,38 @@ class NodeFinder:
 		output['pair_offset'] = self.pair_offset
 		output['boundary_num'] = self.boundary_num
 		output['lambda'] = self.lam
+		output['width'] = self.r_2 - self.r_1
 		return output
 
 	def init_boundary_nodes(self):
 		#Initialize inlet and outlet nodes--dirichlet boundary conditions
-		n = np.ceil(2*self.del_r / self.h)       #Boundary nodes are twice as densely packed as interior nodes
-		a, b = self.r_1, self.r_1 + self.del_r
-		self.nodes = [[0.0, s] for s in np.linspace(a, b, n)]		
+		self.nodes = []
+#		n = np.ceil(2*self.del_r / self.h)       #Boundary nodes are twice as densely packed as interior nodes
+#		a, b = self.r_1, self.r_1 + self.del_r
+#		self.nodes = [[0.0, s] for s in np.linspace(a, b, n)]		
 
-		a, b = self.r_2 - 2*self.del_r, self.r_2 - self.del_r
-		self.nodes.extend([ [2*np.pi, s] for s in np.linspace(a, b, n)])
+#		a, b = self.r_2 - 2*self.del_r, self.r_2 - self.del_r
+#		self.nodes.extend([ [2*np.pi, s] for s in np.linspace(a, b, n)])
 
 		self.outlet_num = len(self.nodes)
 
 		#Initialize top and bottom nodes--dirichlet boundary conditions
 		n = np.ceil(2*(self.r_2 - self.r_1 - self.del_r)/self.h)
 		a, b = 0.0, 2*np.pi
-		self.nodes.extend([ [theta, self.r_1] for theta in np.linspace(a, b, n)[1:]])
+		self.nodes.extend([ [theta, self.r_1] for theta in np.linspace(a, b, n)])
 
 		a, b = 0.0, 2*np.pi
-		self.nodes.extend([ [theta, self.r_2 - self.del_r] for theta in np.linspace(a, b, n)[:-1]])		
+		self.nodes.extend([ [theta, self.r_2 - self.del_r] for theta in np.linspace(a, b, n)])		
 
 		self.dirichlet_num = len(self.nodes)
 
 		#Initialize wrap-around nodes, these nodes are paired. Pairs must always have the same partial derivatives.
-		n = int(np.ceil(2*(self.r_2 - self.r_1 - 2*self.del_r)/self.h))
-		self.pair_offset = n - 2
-
+		#n = int(np.ceil(2*(self.r_2 - self.r_1 - 2*self.del_r)/self.h))
+		#self.pair_offset = n - 2
+		self.pair_offset = 0
 		#left pairs
-		a, b = self.r_1 + self.del_r, self.r_2 - self.del_r
-		self.nodes.extend([ [0.0, s] for s in np.linspace(a, b, n)[1:-1]])
+		#a, b = self.r_1 + self.del_r, self.r_2 - self.del_r
+		#self.nodes.extend([ [0.0, s] for s in np.linspace(a, b, n)[1:-1]])
 		#right pairs
 		#a, b = self.r_1, self.r_2 - 2*self.del_r
 		#self.nodes.extend([ [2*np.pi, s] for s in np.linspace(a, b, n)[1:-1]])
@@ -87,3 +89,25 @@ class NodeFinder:
 					x[0] = 2*np.pi*x[0]
 					self.nodes.append(x)
 		self.nodes = np.array(self.nodes)
+
+class NodeFinderSimple(NodeFinder):
+	# node finder for the special case of a domain whose inlet/outlet covers the entire left and right boundaries
+	def __init__(self, r_1, r_2, h):
+		NodeFinder.__init__(self, r_1, r_2, 1e999, h)
+		self.nodes[:,0] *= .5
+
+	def init_boundary_nodes(self):
+		self.del_r = 0#self.r_2 - self.r_1
+		n = np.ceil(2*(self.r_2 - self.r_1)/self.h)
+		self.nodes = [[0.0, s] for s in np.linspace(self.r_1, self.r_2, n)[1:-1]]
+		self.nodes.extend([2*np.pi, s] for s in np.linspace(self.r_1, self.r_2, n)[1:-1])
+		self.outlet_num = len(self.nodes)
+
+		self.nodes.extend([alpha, self.r_1] for alpha in np.linspace(0, 2*np.pi, n))
+		self.nodes.extend([alpha, self.r_2] for alpha in np.linspace(0, 2*np.pi, n))
+
+		self.dirichlet_num = len(self.nodes)
+
+		self.pair_offset = 0
+		self.pair_num = 0
+		self.boundary_num = self.dirichlet_num
