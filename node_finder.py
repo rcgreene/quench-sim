@@ -97,7 +97,7 @@ class NodeFinderSimple(NodeFinder):
 		self.nodes[:,0] *= .5
 
 	def init_boundary_nodes(self):
-		self.del_r = 0#self.r_2 - self.r_1
+		self.del_r = 0
 		n = np.ceil(2*(self.r_2 - self.r_1)/self.h)
 		self.nodes = [[0.0, s] for s in np.linspace(self.r_1, self.r_2, n)[1:-1]]
 		self.nodes.extend([2*np.pi, s] for s in np.linspace(self.r_1, self.r_2, n)[1:-1])

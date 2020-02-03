@@ -300,6 +300,8 @@ class QuenchSim:
 		self.nodes = output['nodes']
 		self.p_num = self.nodes.shape[0]
 		self.lam = output['lambda']
+		if self.SIMPLE:
+			self.lam = (r_2 - r_1)/(np.pi)
 		self.r = self.nodes[:, 1] + self.nodes[:, 0]*self.lam
 		self.outlet_num = output['outlet_num']
 		self.dirichlet_num = output['dirichlet_num']
